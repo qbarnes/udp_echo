@@ -1,0 +1,83 @@
+#! /bin/bash
+#
+# Scan all the machine's CPUs looking for ones that can't communicate
+# over networking.
+#
+
+set -o nounset
+set -o errexit -o errtrace
+shopt -s nullglob extglob
+
+function catchsig_usr1
+{
+	Received_usr1=1
+}
+
+function catchsig_chld
+{
+	Received_chld=1
+}
+
+function server_start
+{
+	local i
+
+	trap catchsig_usr1 USR1
+	trap catchsig_chld CHLD
+
+	taskset -c 0 ./udp_server -s $$ &> /dev/null &
+	Servpid=$!
+
+	for ((i=0;i<50 && Received_usr1 == 0 && Received_chld == 0;++i))
+	do
+		sleep .1
+	done
+
+	if ((i >= 50 || Received_usr1 == 0 || Received_chld == 1))
+	then
+		server_cleanup
+		return 1
+	fi
+
+	return 0
+}
+
+function server_cleanup
+{
+	if [[ -n $Servpid ]]
+	then
+		kill "$Servpid" 2> /dev/null || :
+		wait "$Servpid" 2> /dev/null || :
+		Servpid=
+	fi
+}
+
+
+declare Received_usr1=0
+declare Received_chld=0
+declare Servpid=
+
+trap server_cleanup ERR
+
+server_start || { echo >&2 "Server failed to start."; exit 1; }
+
+declare cpurange=$(</sys/devices/system/cpu/present)
+declare maxcpu=${cpurange##*-}
+declare probcpus=()
+
+for ((i=0;i<maxcpu;++i))
+do
+	timeout 1 taskset -c $i ./udp_client > /dev/null 2>&1 || \
+		probcpus+=($i)
+done
+
+server_cleanup "$Servpid"
+
+if (( ${#probcpus[@]} ))
+then
+	echo "Problem cpus: ${probcpus[@]}"
+else
+	echo "Everything ok"
+fi
+
+exit 0
