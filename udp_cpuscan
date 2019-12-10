@@ -65,10 +65,18 @@ declare cpurange=$(</sys/devices/system/cpu/present)
 declare maxcpu=${cpurange##*-}
 declare probcpus=()
 
+declare i toev
 for ((i=0;i<maxcpu;++i))
 do
-	timeout 1 taskset -c $i ./udp_client > /dev/null 2>&1 || \
+	timeout 5 taskset -c $i ./udp_client > /dev/null 2>&1
+	toev=$?
+	if ((toev >= 124))
+	then
+		echo "Starting udp_client for CPU $i timed out."
+	elif ((toev > 0))
+	then
 		probcpus+=($i)
+	fi
 done
 
 server_cleanup "$Servpid"
