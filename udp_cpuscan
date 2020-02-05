@@ -68,11 +68,12 @@ declare probcpus=()
 declare i toev
 for ((i=0;i<maxcpu;++i))
 do
-	timeout 5 taskset -c $i ./udp_client > /dev/null 2>&1
-	toev=$?
+	toev=0
+	timeout 5 taskset -c $i ./udp_client > /dev/null 2>&1 || toev=$?
 	if ((toev >= 124))
 	then
-		echo "Starting udp_client for CPU $i timed out."
+		echo >&2 "Starting udp_client for CPU $i timed out."
+		probcpus+=($i)
 	elif ((toev > 0))
 	then
 		probcpus+=($i)
