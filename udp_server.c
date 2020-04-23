@@ -41,7 +41,11 @@ main(int argc, char **argv)
 	int		family = AF_INET;
 	int		sfd;
 	int		retval;
-	struct sockaddr_in serveraddr;
+	size_t		sasz = 0;
+	union {
+		struct sockaddr_in  sin;
+		struct sockaddr_in6 sin6;
+	} sockaddr;
 
 	while ((opt = getopt(argc, argv, "46p:qs:")) != -1) {
 		switch(opt) {
@@ -92,17 +96,30 @@ main(int argc, char **argv)
 		usage(argv[0], 1);
 	}
 
-	if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+	if ((sfd = socket(family, SOCK_DGRAM, 0)) == -1) {
 		perror("socket failed");
 		return 1;
 	}
 
-	serveraddr = (struct sockaddr_in){0};
-	serveraddr.sin_family = family;
-	serveraddr.sin_port = htons(port);
-	serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	switch (family) {
+	case AF_INET:
+		sockaddr.sin = (struct sockaddr_in){0};
+		sockaddr.sin.sin_family = family;
+		sockaddr.sin.sin_port = htons(port);
+		sockaddr.sin.sin_addr.s_addr = htonl(INADDR_ANY);
+		sasz = sizeof(sockaddr.sin);
+		break;
 
-	if (bind(sfd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) == -1) {
+	case AF_INET6:
+		sockaddr.sin6 = (struct sockaddr_in6){0};
+		sockaddr.sin6.sin6_family = family;
+		sockaddr.sin6.sin6_port = htons(port);
+		sockaddr.sin6.sin6_addr = in6addr_any;
+		sasz = sizeof(sockaddr.sin6);
+		break;
+	}
+
+	if (bind(sfd, (struct sockaddr *)&sockaddr, sasz) == -1) {
 		perror("bind failed");
 		return 1;
 	}
@@ -113,14 +130,18 @@ main(int argc, char **argv)
 	}
 
 	while (1) {
-		struct sockaddr_in	claddr;
+		union {
+			struct sockaddr_in	claddr_in;
+			struct sockaddr_in6	claddr_in6;
+		} claddr;
 		socklen_t		clientlen;
 		int			length;
 		struct timeval		tv;
 		int			rv;
 		char			buffer[1024];
 
-		clientlen = sizeof(claddr);
+		clientlen = (family == AF_INET) ?
+			sizeof(claddr.claddr_in) : sizeof(claddr.claddr_in6);
 		length = recvfrom(sfd, buffer, sizeof(buffer) - 1, 0,
 			(struct sockaddr *) &claddr, &clientlen);
 
@@ -143,7 +164,8 @@ main(int argc, char **argv)
 			fflush(stdout);
 		}
 
-		clientlen = sizeof(claddr);
+		clientlen = (family == AF_INET) ?
+			sizeof(claddr.claddr_in) : sizeof(claddr.claddr_in6);
 		if ((rv = sendto(sfd, buffer, length, 0,
 				(struct sockaddr *)&claddr, clientlen)) == -1) {
 			perror("sendto failed");
